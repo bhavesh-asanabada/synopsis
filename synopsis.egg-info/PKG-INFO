@@ -1,3 +1,28 @@
+Metadata-Version: 2.4
+Name: synopsis
+Version: 0.1.0
+Summary: A local-first research library: OCR, DOI metadata, citations, and a research workspace.
+License: Apache-2.0
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: Flask<4,>=3.1
+Requires-Dist: waitress<4,>=3
+Requires-Dist: pypdf<7,>=6
+Requires-Dist: pypdfium2<6,>=4.30
+Requires-Dist: pytesseract<0.4,>=0.3.13
+Requires-Dist: Pillow<13,>=11
+Requires-Dist: requests<3,>=2.32
+Requires-Dist: python-docx<2,>=1.1
+Requires-Dist: bibtexparser<2,>=1.4
+Requires-Dist: rispy<1,>=0.10
+Requires-Dist: citeproc-py<1,>=0.9
+Requires-Dist: citeproc-py-styles<1,>=0.1.5
+Requires-Dist: fastembed<0.9,>=0.8
+Requires-Dist: langdetect<2,>=1.0.9
+Requires-Dist: PyMuPDF<2,>=1.26
+Dynamic: license-file
+
 # Synopsis
 
 A local-first research library built with **Python and Flask**, SQLite, and a browser interface. Add a document, extract or OCR its text, retrieve metadata from its DOI, and keep your references, notes, and citations together.

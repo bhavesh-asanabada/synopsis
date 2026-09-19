@@ -1,0 +1,2 @@
+[console_scripts]
+synopsis = synopsis.cli:main

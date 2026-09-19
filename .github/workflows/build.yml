@@ -47,5 +47,11 @@ jobs:
       - name: Dependency check
         run: pip check
 
+      - name: Package install check
+        run: |
+          pip install -e . -q
+          command -v synopsis
+          python -c "from synopsis.cli import main; from synopsis import create_app; create_app(); print('package OK')"
+
       - name: Run test suite
         run: python -m pytest -q

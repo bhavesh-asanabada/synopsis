@@ -9,6 +9,7 @@ from urllib.parse import urlsplit
 
 import numpy as np
 import requests
+from ._paths import default_model_cache_dir
 from .documents import fingerprint
 from .storage import now
 
@@ -70,7 +71,7 @@ def get_model():
     with MODEL_LOCK:
         if _MODEL is None:
             from fastembed import TextEmbedding
-            cache=os.environ.get('SYNOPSIS_MODEL_CACHE',str(Path(__file__).resolve().parent.parent/'data'/'models'))
+            cache=os.environ.get('SYNOPSIS_MODEL_CACHE',str(default_model_cache_dir()))
             _MODEL=TextEmbedding(MODEL, cache_dir=cache, threads=2)
     return _MODEL
 

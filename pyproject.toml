@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synopsis"
+version = "0.1.0"
+description = "A local-first research library: OCR, DOI metadata, citations, and a research workspace."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+dependencies = [
+  "Flask>=3.1,<4",
+  "waitress>=3,<4",
+  "pypdf>=6,<7",
+  "pypdfium2>=4.30,<6",
+  "pytesseract>=0.3.13,<0.4",
+  "Pillow>=11,<13",
+  "requests>=2.32,<3",
+  "python-docx>=1.1,<2",
+  "bibtexparser>=1.4,<2",
+  "rispy>=0.10,<1",
+  "citeproc-py>=0.9,<1",
+  "citeproc-py-styles>=0.1.5,<1",
+  "fastembed>=0.8,<0.9",
+  "langdetect>=1.0.9,<2",
+  "PyMuPDF>=1.26,<2",
+]
+
+[project.scripts]
+synopsis = "synopsis.cli:main"
+
+[tool.setuptools]
+packages = ["synopsis"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+synopsis = ["templates/*", "static/*"]

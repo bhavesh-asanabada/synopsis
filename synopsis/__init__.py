@@ -19,6 +19,7 @@ from flask import Flask, jsonify, render_template, request, send_file, abort
 from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
+from ._paths import PACKAGE_DIR, default_data_dir
 from .storage import Store, summary
 from .processing import Processor, ALLOWED
 from .metadata import lookup_doi
@@ -95,10 +96,9 @@ def validate_fields(payload, store):
 
 
 def create_app(config=None):
-    root = Path(__file__).resolve().parent.parent
-    app = Flask(__name__, template_folder=str(root / 'templates'), static_folder=str(root / 'static'))
+    app = Flask(__name__, template_folder=str(PACKAGE_DIR / 'templates'), static_folder=str(PACKAGE_DIR / 'static'))
     app.json.sort_keys = False
-    app.config.update(DATA_DIR=os.environ.get('SYNOPSIS_DATA_DIR', str(root / 'data')),
+    app.config.update(DATA_DIR=os.environ.get('SYNOPSIS_DATA_DIR', str(default_data_dir())),
                       MAX_CONTENT_LENGTH=100 * 1024 * 1024, PROCESS_JOBS=True,
                       TEMPLATES_AUTO_RELOAD=True,
                       TRUSTED_HOSTS=['localhost', '127.0.0.1', '[::1]'])
