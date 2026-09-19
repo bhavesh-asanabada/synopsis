@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install Tesseract OCR
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      # Model + browser downloads are cached separately since they don't change with every commit.
+      - name: Cache local semantic model
+        uses: actions/cache@v4
+        with:
+          path: data/models
+          key: fastembed-bge-small-en-v1.5-onnx-q
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements-dev.txt') }}
+
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Compile check
+        run: python -m compileall -q synopsis manage.py app.py
+
+      - name: Dependency check
+        run: pip check
+
+      - name: Run test suite
+        run: python -m pytest -q
