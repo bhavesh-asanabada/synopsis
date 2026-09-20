@@ -21,17 +21,14 @@ Open **Research workspace** beside Add to library, or select a reference and use
 
 ## Configure generative AI
 
-1. Open **Research workspace → AI & alerts**.
-2. Enter a Chat Completions-compatible API base URL, such as the provider's documented `/v1` endpoint, and an exact model identifier supported by that provider.
-3. Set the credential in the environment of the Flask process, then restart it:
+1. Open **Settings & backup → AI model**.
+2. Enter a Chat Completions-compatible **AI provider API URL** and the exact **AI model identifier** offered by that provider. A compatible local server is also supported.
+3. Enter the **AI API key** if the provider requires one. Leave this field blank to keep a saved key for the same URL. Use **Remove saved API key** to remove it. Saved keys are stored in the local SQLite database (not encrypted), are never returned by settings APIs, and are excluded from exported ZIP backups. Changing the provider URL clears the saved key unless you supply a replacement. An existing `SYNOPSIS_AI_API_KEY` environment variable is used as a fallback when no saved key applies.
+4. Click **Test model** to check the URL, credentials, model, and JSON response support. This sends a small synthetic message without document content and does not save changes.
+5. Check **Enable AI answers and summaries** and click **Save preferences**. The saved model takes effect for new AI requests immediately, without restarting Synopsis.
+6. In **Research workspace → Search & ask**, select **Request AI synthesis**, or click **AI summary draft** in **Paper insights**. Generated results show the model used.
 
-   ```sh
-   source .venv/bin/activate
-   export SYNOPSIS_AI_API_KEY='your-provider-key'
-   python app.py
-   ```
-
-4. Enable the provider in the application. In Search & ask, explicitly select **Request AI synthesis**, or click **AI summary draft** in Insights.
+The provider/model controls in **Research workspace → AI & alerts** update the same configuration. OCR and semantic embeddings still run locally with their existing engines; this setting controls generative answers, summaries, and chat architecture diagrams. Chat uses separate optional image-model and web-search settings; see the [chat guide](CHAT.md).
 
 The connector sends `POST {base_url}/chat/completions` with `messages` and `response_format: {"type":"json_object"}`. The provider/model must support that interface. A compatible local server can use an HTTP loopback URL, for example `http://127.0.0.1:11434/v1`; a model must actually be installed and served there. External endpoints require HTTPS. API keys are not returned to the browser or included in library backups.
 
@@ -51,6 +48,6 @@ References: [FastEmbed](https://github.com/qdrant/fastembed), [OpenAlex authenti
 
 SQLite tables are added without replacing existing library records. Existing documents continue to work; **Paper insights → Reprocess OCR** upgrades a document with page geometry, language, provenance, and tables. Preserve old evidence as a historical snapshot if OCR changes: the reader flags stale passage links, and PDF export rejects stale geometric annotations.
 
-Version-2 backups include research entities (notebooks, matrices, reviews, versions, relations, rules, watcher configurations, and status snapshots) alongside original files and metadata. The recovery command accepts both original version-1 and version-2 backups. Recovered watchers and generative AI are disabled until explicitly re-enabled; this avoids automatically scanning obsolete local paths or transmitting text after a restore. Search vectors can be rebuilt and model weights are not included in a backup.
+Version-2 backups include research entities (notebooks, matrices, reviews, versions, relations, rules, watcher configurations, status snapshots, and chat conversations with generated images/diagrams) alongside original files and metadata. The recovery command accepts both original version-1 and version-2 backups. Recovered watchers, generative AI, image generation, and web search are disabled until explicitly re-enabled; this avoids automatically scanning obsolete local paths or transmitting text after a restore. Provider credentials are excluded. Search vectors can be rebuilt and model weights are not included in a backup.
 
 This remains a local single-user web application. Browser capture extensions, authenticated multi-user sync, shared cloud libraries, and Word/Google Docs/LibreOffice live citation integrations remain separate work; advanced research features do not imply those integrations exist.

@@ -9,13 +9,15 @@
   <script src="{{ url_for('static', filename='app.js') }}" type="module"></script>
   <link rel="stylesheet" href="/static/research.css">
   <script type="module" src="/static/research.js"></script>
+  <link rel="stylesheet" href="/static/chat.css">
+  <script type="module" src="/static/chat.js"></script>
 </head>
 <body>
   <div class="workspace">
     <aside class="sidebar" id="sidebar">
       <a href="/" class="brand"><span class="brand-mark">s<span>↗</span></span>synopsis<span class="brand-dot">.</span></a>
       <div class="workspace-label"><span class="workspace-avatar">P</span><span>Personal workspace<small>Your ideas belong here</small></span></div>
-      <div class="sidebar-scroll"><div id="navigation"></div><div class="section-label">COLLECTIONS<button class="icon-button" data-action="collection" aria-label="New collection" title="New collection">+</button></div><div id="collections"></div><div class="section-label tags-label">YOUR TAGS</div><div id="tags"></div></div>
+      <div class="sidebar-scroll"><div id="navigation"></div><button class="nav-item" data-chat-open="full" aria-label="Chat workspace"><span aria-hidden="true">✧</span> <span>Chat workspace</span></button><div class="section-label">COLLECTIONS<button class="icon-button" data-action="collection" aria-label="New collection" title="New collection">+</button></div><div id="collections"></div><div class="section-label tags-label">YOUR TAGS</div><div id="tags"></div></div>
       <div class="sidebar-bottom"><div class="local-status"><span class="status-dot"></span><span>Saved on this computer<small>Your library, your space.</small></span></div><button class="nav-item settings-button" data-action="settings"><span id="settings-icon"></span>Settings & backup<span class="shortcut">⌘ ,</span></button></div>
     </aside>
     <section class="main-shell">
@@ -30,6 +32,8 @@
   </div>
   <dialog id="research-dialog" aria-labelledby="research-title"></dialog>
   <dialog id="modal" aria-labelledby="dialog-title"><div id="modal-content"></div></dialog>
+  <button id="chat-launcher" data-chat-open="mini" aria-label="Open Synopsis chat">✧ <span>Ask Synopsis</span></button>
+  <dialog id="chat-dialog" aria-labelledby="chat-title"></dialog>
   <div id="toast-region" role="status" aria-live="polite"></div>
   <div id="drop-overlay" hidden><div class="drop-card"><div class="upload-orbit">↓</div><h2>Make room for a new idea.</h2><p>Drop your documents to add them to Synopsis.</p><span>PDF · IMAGES · DOCX · TEXT</span></div></div>
   <input type="file" id="file-input" multiple accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.webp,.docx,.txt,.md" hidden>

@@ -1,5 +1,6 @@
 """Real-browser checks against an isolated Flask library, never the user's data."""
 import threading
+import json
 
 import pytest
 from playwright.sync_api import sync_playwright, expect
@@ -102,6 +103,7 @@ def test_browser_library_workflow(browser_app, tmp_path):
         expect(page.locator('#sidebar')).to_have_class('sidebar mobile-open')
         page.locator('[data-scope=all]').click()
         page.get_by_role('button', name='Workspace settings', exact=True).click()
+        page.get_by_role('tab', name='OCR & metadata', exact=True).click()
         expect(page.get_by_text('Tesseract is installed and ready.', exact=False)).to_be_visible()
         page.get_by_role('button', name='Save preferences', exact=True).click()
         assert errors == []
@@ -210,7 +212,20 @@ def test_upload_folder_settings_workflow(browser_app, tmp_path):
         page = browser.new_page(viewport={'width': 1440, 'height': 900})
         page.goto(url)
         page.get_by_role('button', name='Workspace settings', exact=True).click()
+        page.get_by_role('tab', name='Local storage', exact=True).click()
         page.get_by_label('Upload folder', exact=True).fill(str(destination))
+        page.get_by_role('tab', name='AI model', exact=True).click()
+        page.get_by_role('tab', name='Local storage', exact=True).click()
+        expect(page.get_by_label('Upload folder', exact=True)).to_have_value(str(destination))
+        nav=page.locator('.settings-navigation').bounding_box()
+        content=page.locator('.settings-content').bounding_box()
+        assert nav['x']+nav['width'] <= content['x']+1 and nav['width'] < content['width']/2
+        page.get_by_role('tab', name='Cloud storage', exact=True).click()
+        page.locator('.settings-content').evaluate('(el)=>el.scrollTop=el.scrollHeight')
+        assert page.locator('#modal').evaluate('(el)=>el.scrollHeight===el.clientHeight')
+        expect(page.get_by_role('button', name='Save preferences', exact=True)).to_be_in_viewport()
+        page.screenshot(path='artifacts/settings-two-column.png')
+        page.get_by_role('tab', name='Local storage', exact=True).click()
         page.get_by_role('button', name='Save preferences', exact=True).click()
         expect(page.locator('#modal')).not_to_be_visible()
         assert destination.is_dir()
@@ -222,6 +237,7 @@ def test_upload_folder_settings_workflow(browser_app, tmp_path):
         page.get_by_role('button', name='Close dialog', exact=True).click()
         page.reload()
         page.get_by_role('button', name='Workspace settings', exact=True).click()
+        page.get_by_role('tab', name='Local storage', exact=True).click()
         expect(page.get_by_label('Upload folder', exact=True)).to_have_value(str(destination))
         page.get_by_label('Upload folder', exact=True).fill('relative/path')
         page.get_by_role('button', name='Save preferences', exact=True).click()
@@ -232,4 +248,127 @@ def test_upload_folder_settings_workflow(browser_app, tmp_path):
         expect(page.locator('#modal')).not_to_be_visible()
         assert app.extensions['store'].uploads == app.extensions['store'].default_uploads
         assert page.request.get(url + f"/api/items/{item['id']}/file").status == 200
+        browser.close()
+
+
+@pytest.mark.parametrize('view', ['List', 'Grid', 'Table'])
+def test_permanent_delete_from_trash(browser_app, view):
+    app, url = browser_app
+    store = app.extensions['store']
+    active = store.create({'title': 'Keep active reference'})
+    deleted = []
+    for number in range(3):
+        filename = f'trashed-{number}.txt'
+        (store.uploads / filename).write_text(f'Trashed research document {number}')
+        deleted.append(store.create({'title': f'Trashed paper {number}', 'trashed': True,
+                                     'fileName': filename, 'filePath': filename}))
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={'width': 1440, 'height': 900})
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.goto(url)
+        page.get_by_role('button', name=view + ' view', exact=True).click()
+        page.get_by_role('button', name='Select all', exact=True).click()
+        expect(page.locator('#bulk-bar [data-action="delete-selected"]')).to_have_count(0)
+        page.locator('[data-scope="trash"]').click()
+        for item in deleted[:2]:
+            page.get_by_role('checkbox', name='Select ' + item['title'], exact=True).check()
+        page.locator('#bulk-bar').get_by_role('button', name='Delete permanently', exact=True).click()
+        expect(page.locator('#dialog-title')).to_have_text('Permanently delete 2 references?')
+        expect(page.locator('.delete-reference-list li')).to_have_text([item['title'] for item in store.items() if item['id'] in {i['id'] for i in deleted[:2]}])
+        page.get_by_role('button', name='Keep in trash', exact=True).click()
+        assert all(store.get(item['id']) and store.document_path(item).exists() for item in deleted)
+        page.locator('#bulk-bar').get_by_role('button', name='Delete permanently', exact=True).click()
+        page.locator('#modal').get_by_role('button', name='Delete permanently', exact=True).click()
+        expect(page.locator('#toast-region')).to_contain_text('2 references permanently deleted')
+        assert all(store.get(item['id']) is None and not store.document_path(item).exists() for item in deleted[:2])
+        assert store.get(deleted[2]['id']) and store.document_path(deleted[2]).exists()
+        assert store.get(active['id'])
+        page.locator('.reference,.table-reference').click()
+        page.get_by_role('button', name='Permanently delete', exact=True).click()
+        expect(page.locator('#dialog-title')).to_have_text('Permanently delete this reference?')
+        page.locator('#modal').get_by_role('button', name='Delete permanently', exact=True).click()
+        expect(page.locator('#toast-region')).to_contain_text('1 reference permanently deleted')
+        expect(page.locator('.reference,.table-reference')).to_have_count(0)
+        expect(page.locator('.detail-placeholder')).to_have_count(1)
+        page.reload()
+        expect(page.locator('.reference,.table-reference')).to_have_count(1)
+        assert store.get(active['id']) and errors == []
+        browser.close()
+
+
+def test_permanent_delete_reports_protected_references(browser_app):
+    app, url = browser_app
+    store = app.extensions['store']
+    protected = store.create({'title': 'Evidence cited by my notebook', 'trashed': True})
+    removable = store.create({'title': 'Discarded draft', 'trashed': True})
+    store.put_entity('notebooks', {'title': 'Important evidence', 'claims': [{'source': {'itemId': protected['id']}}]})
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={'width': 390, 'height': 844})
+        page.goto(url)
+        page.get_by_role('button', name='Toggle navigation', exact=True).click()
+        page.locator('[data-scope="trash"]').click()
+        page.get_by_role('button', name='Select all', exact=True).click()
+        page.locator('#bulk-bar').get_by_role('button', name='Delete permanently', exact=True).click()
+        page.locator('#modal').get_by_role('button', name='Delete permanently', exact=True).click()
+        expect(page.locator('#dialog-title')).to_have_text('Some references could not be deleted')
+        expect(page.locator('#modal')).to_contain_text('1 permanently deleted; 1 could not be deleted.')
+        expect(page.locator('.delete-reference-list')).to_contain_text('Research records cite this document')
+        assert store.get(protected['id']) and store.get(removable['id']) is None
+        page.get_by_role('button', name='Done', exact=True).click()
+        expect(page.locator('.reference')).to_have_count(1)
+        expect(page.get_by_role('checkbox', name='Select ' + protected['title'], exact=True)).to_be_checked()
+        assert page.evaluate('document.scrollingElement.scrollWidth === innerWidth')
+        browser.close()
+
+
+def test_ai_model_settings_and_summary_use_selected_model(browser_app, monkeypatch):
+    app, url = browser_app
+    app.extensions['store'].create({'title':'Research evidence', 'text':'Research question\nHow does sample size affect results?\n\nMethods\nThirty participants were studied.'})
+    monkeypatch.delenv('SYNOPSIS_AI_API_KEY',raising=False)
+    calls=[]
+    class Reply:
+        def __init__(self,result):self.result=result
+        def raise_for_status(self):pass
+        def json(self):return {'choices':[{'message':{'content':json.dumps(self.result)}}]}
+    def provider(endpoint,**kwargs):
+        calls.append(kwargs)
+        messages=kwargs['json']['messages']
+        if 'connection test' in messages[0]['content']:
+            return Reply({'ok':True})
+        source=json.loads(messages[1]['content'])['passages'][0]
+        return Reply({'claims':[{'text':'A generated summary from the selected model.','citations':[{'id':source['id'],'quote':source['text']}]}]})
+    monkeypatch.setattr('synopsis.ai.requests.post',provider)
+    with sync_playwright() as p:
+        browser=p.chromium.launch()
+        page=browser.new_page(viewport={'width':1440,'height':900})
+        errors=[]
+        page.on('pageerror',lambda error:errors.append(str(error)))
+        page.goto(url)
+        page.get_by_role('button',name='Workspace settings',exact=True).click()
+        page.locator('[name=aiEnabled]').check()
+        page.get_by_label('AI provider API URL',exact=True).fill('https://provider.example/v1')
+        page.get_by_label('AI model identifier',exact=True).fill('my-selected-model')
+        page.get_by_label('AI API key',exact=True).fill('test-key-only')
+        page.get_by_role('button',name='Test model',exact=True).click()
+        expect(page.locator('#ai-test-result')).to_contain_text('Model connection succeeded')
+        assert not app.extensions['store'].setting('ai',{}).get('enabled')
+        page.get_by_role('button',name='Save preferences',exact=True).click()
+        expect(page.locator('#modal')).not_to_be_visible()
+        page.reload()
+        page.get_by_role('button',name='Workspace settings',exact=True).click()
+        expect(page.get_by_label('AI model identifier',exact=True)).to_have_value('my-selected-model')
+        expect(page.get_by_label('AI API key',exact=True)).to_have_value('')
+        expect(page.get_by_label('AI API key',exact=True)).to_have_attribute('type','password')
+        page.get_by_role('button',name='Close dialog',exact=True).click()
+        page.get_by_role('button',name='Research workspace',exact=True).click()
+        page.get_by_role('button',name='Paper insights',exact=True).click()
+        page.get_by_role('button',name='AI summary draft',exact=True).click()
+        expect(page.locator('#ai-summary-output')).to_contain_text('A generated summary from the selected model.')
+        expect(page.locator('#ai-summary-output')).to_contain_text('my-selected-model')
+        assert all(call['json']['model']=='my-selected-model' for call in calls)
+        assert all(call['headers']['Authorization']=='Bearer test-key-only' for call in calls)
+        assert errors==[]
         browser.close()

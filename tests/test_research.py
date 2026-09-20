@@ -78,7 +78,7 @@ def test_semantic_search_filters_and_excludes_trash(app,client):
 
 def test_ask_is_extract_only_unless_explicit(app,client,monkeypatch):
     document(app)
-    monkeypatch.setattr('synopsis.intelligence.requests.post',lambda *a,**k:pytest.fail('Unexpected external document transmission'))
+    monkeypatch.setattr('synopsis.ai.requests.post',lambda *a,**k:pytest.fail('Unexpected external document transmission'))
     result=post(client,'/ask',{'query':'small datasets reliability'})
     assert result.json['mode']=='extractive'
     assert result.json['claims']==[]
@@ -92,6 +92,99 @@ def configure_ai(client):
     assert result.status_code==200
 
 
+def test_main_settings_model_is_used_for_answers_and_summaries(app,client,monkeypatch):
+    import zipfile
+    from synopsis.storage import Store
+    monkeypatch.delenv('SYNOPSIS_AI_API_KEY',raising=False)
+    item=document(app)
+    calls=[]
+    class Reply:
+        def __init__(self,content):self.content=content
+        def raise_for_status(self):pass
+        def json(self):return {'choices':[{'message':{'content':json.dumps(self.content)}}]}
+    def provider(url,**kwargs):
+        calls.append((url,kwargs))
+        messages=kwargs['json']['messages']
+        if 'connection test' in messages[0]['content']:
+            return Reply({'ok':True})
+        passage=json.loads(messages[1]['content'])['passages'][0]
+        return Reply({'claims':[{'text':'A reviewable interpretation','citations':[{'id':passage['id'],'quote':passage['text']}]}]})
+    monkeypatch.setattr('synopsis.ai.requests.post',provider)
+    config={'enabled':True,'endpoint':'https://provider.example/v1','model':'chosen-model','apiKey':'private-fixture-key'}
+    tested=client.post('/api/settings/test-ai',json={'ai':config},headers=H)
+    assert tested.status_code==200 and tested.json['model']=='chosen-model'
+    assert app.extensions['store'].setting('ai',{})=={}
+    assert 'passages' not in calls[0][1]['json']['messages'][1]['content']
+    assert client.patch('/api/settings',json={'ai':config},headers=H).status_code==200
+    public=client.get('/api/settings').json['ai']
+    assert public['model']=='chosen-model' and public['hasSavedApiKey']
+    assert public==client.get('/api/research/overview').json['ai']
+    assert Store(app.extensions['store'].root).setting('ai')['model']=='chosen-model'
+    asked=post(client,'/ask',{'query':'small dataset reliability','useAI':True})
+    summary=post(client,f"/items/{item['id']}/summary",{'useAI':True})
+    for result in (asked,summary):
+        assert result.status_code==200 and result.json['model']=='chosen-model',result.json
+        assert result.json['claims']
+    for url,request in calls:
+        assert url=='https://provider.example/v1/chat/completions'
+        assert request['json']['model']=='chosen-model'
+        assert request['headers']['Authorization']=='Bearer private-fixture-key'
+    # Switch models without a restart or resubmitting the saved key.
+    config.update(model='second-model',apiKey='')
+    assert client.patch('/api/settings',json={'ai':config},headers=H).status_code==200
+    assert post(client,f"/items/{item['id']}/summary",{'useAI':True}).json['model']=='second-model'
+    assert calls[-1][1]['headers']['Authorization']=='Bearer private-fixture-key'
+    assert 'private-fixture-key' not in client.get('/api/settings').text
+    assert 'private-fixture-key' not in client.get('/api/research/overview').text
+    with zipfile.ZipFile(io.BytesIO(client.get('/api/backup').data)) as archive:
+        assert b'private-fixture-key' not in archive.read('library.json')
+    # The older research settings pane shares the same configuration and key.
+    config['model']='research-pane-model'
+    assert client.patch('/api/research/settings',json={'ai':config},headers=H).status_code==200
+    assert client.get('/api/settings').json['ai']['model']=='research-pane-model'
+    assert client.get('/api/settings').json['ai']['hasSavedApiKey']
+    config['enabled']=False
+    assert client.patch('/api/settings',json={'ai':config},headers=H).status_code==200
+    before=len(calls)
+    assert post(client,f"/items/{item['id']}/summary",{'useAI':True}).status_code==400
+    assert len(calls)==before
+
+
+def test_ai_credentials_are_bound_to_provider_and_removable(app,client,monkeypatch):
+    from synopsis.ai import ai_key
+    monkeypatch.delenv('SYNOPSIS_AI_API_KEY',raising=False)
+    config={'enabled':True,'endpoint':'https://first.example/v1','model':'model','apiKey':'first-key'}
+    assert client.patch('/api/settings',json={'ai':config},headers=H).status_code==200
+    store=app.extensions['store']
+    config.update(endpoint='https://second.example/v1',apiKey='')
+    assert client.patch('/api/settings',json={'ai':config},headers=H).status_code==200
+    assert ai_key(store,store.setting('ai'))==''
+    assert client.get('/api/settings').json['ai']['hasSavedApiKey'] is False
+    config.update(apiKey='second-key')
+    client.patch('/api/settings',json={'ai':config},headers=H)
+    config.update(apiKey='',clearApiKey=True)
+    assert client.patch('/api/settings',json={'ai':config},headers=H).status_code==200
+    assert store.setting('aiCredential')=={}
+    monkeypatch.setenv('SYNOPSIS_AI_API_KEY','environment-key')
+    assert ai_key(store,store.setting('ai'))=='environment-key'
+    assert client.get('/api/settings').json['ai']['keySource']=='environment'
+
+
+def test_invalid_ai_settings_and_failed_test_do_not_change_saved_model(app,client,monkeypatch):
+    config={'enabled':True,'endpoint':'https://provider.example/v1','model':'original'}
+    client.patch('/api/settings',json={'ai':config},headers=H)
+    for invalid in [None,{}, {**config,'model':''}, {**config,'endpoint':'http://remote.example'},
+                    {**config,'apiKey':42},{**config,'apiKey':'key\r\nInjected: header'},
+                    {**config,'apiKey':'key','clearApiKey':True}]:
+        response=client.patch('/api/settings',json={'ai':invalid,'metadataLookup':True},headers=H)
+        assert response.status_code==400,response.json
+        assert app.extensions['store'].setting('ai')['model']=='original'
+        assert app.extensions['store'].setting('metadataLookup') is False
+    monkeypatch.setattr('synopsis.ai.requests.post',lambda *a,**k:(_ for _ in ()).throw(TimeoutError()))
+    assert client.post('/api/settings/test-ai',json={'ai':{**config,'model':'unavailable'}},headers=H).status_code==400
+    assert app.extensions['store'].setting('ai')['model']=='original'
+
+
 def test_ai_validates_quotes_and_never_exposes_api_key(app,client,monkeypatch):
     item=document(app);s=source(item);configure_ai(client)
     monkeypatch.setenv('SYNOPSIS_AI_API_KEY','test-secret-do-not-display')
@@ -100,7 +193,7 @@ def test_ai_validates_quotes_and_never_exposes_api_key(app,client,monkeypatch):
         def raise_for_status(self):pass
         def json(self):return {'choices':[{'message':{'content':json.dumps({'claims':[{'text':'Interpretation requiring review','citations':[{'id':s['id'],'quote':'How does data scarcity affect reliability?'}]}]})}}]}
     def fake(url,**kwargs):requests.append((url,kwargs));return Reply()
-    monkeypatch.setattr('synopsis.intelligence.requests.post',fake)
+    monkeypatch.setattr('synopsis.ai.requests.post',fake)
     result=app.extensions['intelligence'].synthesize('Explain this',[s])
     assert result['claims'][0]['reviewRequired'] is True
     assert result['claims'][0]['citations'][0]['quote'] in s['text']
@@ -122,14 +215,14 @@ def test_ai_rejects_unsupported_output_atomically(app,client,monkeypatch,claim):
     class Reply:
         def raise_for_status(self):pass
         def json(self):return {'choices':[{'message':{'content':json.dumps({'claims':[claim]})}}]}
-    monkeypatch.setattr('synopsis.intelligence.requests.post',lambda *a,**k:Reply())
+    monkeypatch.setattr('synopsis.ai.requests.post',lambda *a,**k:Reply())
     with pytest.raises(ValueError):app.extensions['intelligence'].synthesize('What does it say?',[s])
     assert app.extensions['store'].entities('notebooks')==[]
 
 
 def test_provider_failure_and_insecure_config(app,client,monkeypatch):
     item=document(app);configure_ai(client)
-    monkeypatch.setattr('synopsis.intelligence.requests.post',lambda *a,**k:(_ for _ in ()).throw(TimeoutError()))
+    monkeypatch.setattr('synopsis.ai.requests.post',lambda *a,**k:(_ for _ in ()).throw(TimeoutError()))
     with pytest.raises(ValueError,match='provider failed'):
         app.extensions['intelligence'].synthesize('Question',[source(item)])
     for url in ['http://remote.example/v1','https://user:password@remote.example/v1','file:///etc/passwd','https://remote.example/v1?key=secret']:

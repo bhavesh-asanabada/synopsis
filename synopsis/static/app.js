@@ -1,3 +1,4 @@
+import {connectorFields, cloudDetail, installCloudUI} from './cloud.js';
 const $ = (selector) => document.querySelector(selector);
 const escape = (value = '') => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const paths = {
@@ -110,9 +111,9 @@ async function refresh({detail=false}={}) {
   renderSidebar();renderList();
   if(detail&&state.selected)await loadDetail(state.selected);
   if(!state.selected)renderDetail();
-  const pending=state.items.some(i=>['queued','processing'].includes(i.status));
+  const pending=state.items.some(i=>['queued','processing'].includes(i.status)||['queued','uploading'].includes(i.cloudStorage?.status));
   clearTimeout(pollTimer);
-  if(pending)pollTimer=setTimeout(()=>refresh({detail:state.detail&&['queued','processing'].includes(state.detail.status)}).catch(e=>toast(e.message,true)),1600);
+  if(pending)pollTimer=setTimeout(()=>refresh({detail:state.detail&&(['queued','processing'].includes(state.detail.status)||['queued','uploading'].includes(state.detail.cloudStorage?.status))}).catch(e=>toast(e.message,true)),1600);
   if(state.modal==='upload'&&state.uploadTab==='files')renderUploadResults();
 }
 function renderSidebar(){
@@ -140,7 +141,7 @@ function renderList(){
   }
   $('#choose-columns').hidden=state.view!=='table';
   const bulk=state.checked.size;
-  $('#bulk-bar').innerHTML=bulk?`<div class="bulk-actions"><strong>${bulk} selected</strong><button data-action="cite-selected">${icon('quote')}Cite / export</button><button data-action="organize-selected">${icon('folder')}Organize</button><button data-action="read-selected">${icon('check')}Mark read</button><button data-action="trash-selected">${icon(state.scope==='trash'?'restore':'trash')}${state.scope==='trash'?'Restore':'Trash'}</button><button class="icon-button" data-action="clear-selection" aria-label="Clear selection">${icon('close')}</button></div>`:'';
+  $('#bulk-bar').innerHTML=bulk?`<div class="bulk-actions"><strong>${bulk} selected</strong>${state.scope==='trash'?`<button data-action="trash-selected">${icon('restore')}Restore</button><button class="danger" data-action="delete-selected">${icon('trash')}Delete permanently</button>`:`<button data-action="cite-selected">${icon('quote')}Cite / export</button><button data-action="organize-selected">${icon('folder')}Organize</button><button data-action="read-selected">${icon('check')}Mark read</button><button data-action="trash-selected">${icon('trash')}Trash</button>`}<button class="icon-button" data-action="clear-selection" aria-label="Clear selection">${icon('close')}</button></div>`:'';
   $('#item-list').className=state.view==='grid'?'item-grid':state.view==='table'?'item-table':'item-list';
   if(!items.length){
     const emptyLibrary=!state.counts.all&&state.scope==='all'&&!state.query&&!state.tag;
@@ -179,7 +180,7 @@ function renderDetail(){
     ${i.abstract?`<div class="detail-section-title">ABSTRACT</div><p class="abstract">${escape(i.abstract)}</p>`:''}
     <div class="detail-section-title">TAGS & COLLECTIONS<button class="text-button" data-action="organize">Edit</button></div><div class="detail-tags">${i.tags.map(t=>`<span class="tag-pill">${escape(t)}</span>`).join('')||'<span class="muted">No tags yet</span>'}</div><div class="detail-collections">${state.collections.filter(c=>i.collections.includes(c.id)).map(c=>`<span>${icon('folder')}${escape(c.name)}</span>`).join('')||'<span class="muted">Not in a collection</span>'}</div>
     ${i.fileName?`<div class="detail-section-title">ATTACHMENT</div><a class="attachment" href="/api/items/${i.id}/file?download=1" download>${icon('file')}<span><strong>${escape(i.fileName)}</strong><small>${formatSize(i.fileSize)}${i.pageCount?' · '+i.pageCount+' pages':''}</small></span>${icon('export')}</a>`:''}
-    <div class="detail-section-title">RESEARCH TOOLS</div><button class="detail-action" data-research="insights">${icon("spark")}Insights & extraction details</button><button class="detail-action" data-research="reader">${icon("book")}Advanced reader</button><button class="detail-action" data-research="documents">${icon("copy")}Versions & attachments</button><div class="detail-section-title">LIBRARY</div><button class="detail-action" data-action="toggle-read">${icon(i.read?'book':'check')}${i.read?'Mark as unread':'Mark as read'}</button><button class="detail-action" data-action="trash">${icon(i.trashed?'restore':'trash')}${i.trashed?'Restore to library':'Move to trash'}</button>${i.trashed?'<button class="detail-action danger" data-action="delete">Permanently delete</button>':''}<p class="added-date">Added ${formatDate(i.createdAt)}</p>
+    ${cloudDetail(i,escape,safeUrl)}<div class="detail-section-title">RESEARCH TOOLS</div><button class="detail-action" data-research="insights">${icon("spark")}Insights & extraction details</button><button class="detail-action" data-research="reader">${icon("book")}Advanced reader</button><button class="detail-action" data-research="documents">${icon("copy")}Versions & attachments</button><div class="detail-section-title">LIBRARY</div><button class="detail-action" data-action="toggle-read">${icon(i.read?'book':'check')}${i.read?'Mark as unread':'Mark as read'}</button><button class="detail-action" data-action="trash">${icon(i.trashed?'restore':'trash')}${i.trashed?'Restore to library':'Move to trash'}</button>${i.trashed?'<button class="detail-action danger" data-action="delete">Permanently delete</button>':''}<p class="added-date">Added ${formatDate(i.createdAt)}</p>
   `:state.tab==='notes'?`<form id="note-form"><label class="field-label" for="note-text">A thought worth keeping</label><textarea id="note-text" name="text" rows="5" placeholder="Connect ideas, ask questions, make it your own…" required maxlength="50000">${escape(state.noteDraft)}</textarea><button class="button primary small" type="submit">${icon('plus')}Save note</button></form><div class="notes-list">${i.notes.map(n=>`<div class="note"><div><small>${formatDate(n.createdAt)}</small><button class="icon-button" data-note-delete="${n.id}" aria-label="Delete note">${icon('trash')}</button></div><p>${escape(n.text)}</p></div>`).join('')||'<p class="field-hint">Your notes stay with this reference and are included in library search.</p>'}</div>`:`<p class="field-hint">Keep meaningful passages with a page reference. Select text in the reader’s Extracted text view, or add a passage below.</p><button class="button secondary small" data-action="highlight">${icon('plus')}Add a highlight</button><div class="notes-list">${i.annotations.map(a=>`<div class="highlight"><div><small>Page ${a.page}</small><button class="icon-button" data-highlight-delete="${a.id}" aria-label="Delete highlight">${icon('trash')}</button></div><p>${escape(a.text)}</p></div>`).join('')||'<div class="small-empty">The important parts will find a home here.</div>'}</div>`}</div>`;
 }
 function safeUrl(value){try{const u=new URL(value);return ['http:','https:'].includes(u.protocol)?u.href:'#';}catch{return '#';}}
@@ -232,9 +233,92 @@ async function exportItems(format){
   if(!response.ok)throw Error((await response.json()).error);
   const url=URL.createObjectURL(await response.blob());const a=document.createElement('a');a.href=url;a.download='synopsis-library.'+({bibtex:'bib',ris:'ris',csl:'json'})[format];a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Bibliography exported');
 }
-async function openSettings(){
-  state.modal='settings';const s=await api('/settings');
-  modal('Your workspace, your way.','A few thoughtful defaults. Room to make it yours.',`<form id="settings-form" class="modal-body"><div class="settings-section"><div class="settings-heading">${icon('spark')}Document intelligence</div><label class="toggle-row"><span><strong>Automatic DOI metadata lookup</strong><small>Send detected DOIs to Crossref to retrieve reference details.<br>Your documents stay on this computer.</small></span><input type="checkbox" name="metadataLookup" ${s.metadataLookup?'checked':''}></label><label class="form-field">OCR language<select name="ocrLanguage" ${!s.languages.length?'disabled':''}>${s.languages.filter(l=>l!=='osd').map(l=>`<option value="${escape(l)}" ${s.ocrLanguage===l?'selected':''}>${l==='eng'?'English':escape(l)}</option>`).join('')}</select></label><p class="field-hint">${s.ocrAvailable?'Tesseract is installed and ready. Additional OCR languages can be installed on your computer.':'Tesseract was not found. Install it to recognize text in scanned PDFs and images.'}</p></div><div class="settings-section"><div class="settings-heading">${icon('folder')}Document storage</div><label class="form-field" for="upload-directory">Upload folder<input id="upload-directory" name="uploadDirectory" type="text" value="${escape(s.uploadDirectory)}" placeholder="${escape(s.defaultUploadDirectory)}" aria-describedby="upload-directory-hint" autocomplete="off" spellcheck="false"></label><p class="field-hint" id="upload-directory-hint">Enter a folder path on the computer running Synopsis, such as ~/Documents/Synopsis, or browse for one. Missing folders are created when you save. New uploads and watched-folder imports use this location; existing documents stay in their current folders.</p><div class="field-buttons"><button class="text-button" type="button" data-action="browse-upload-folder">${icon('folder')}Browse…</button><button class="text-button" type="button" data-action="default-upload-folder" data-default-folder="${escape(s.defaultUploadDirectory)}">Use default folder</button></div></div><div class="settings-section"><div class="settings-heading">${icon('folder')}Your library is local</div><p class="muted">References, notes, and original files are stored on this computer. Cloud sync and shared libraries are not available in this version.</p><a class="button secondary" href="/api/backup">${icon('export')}Download library backup</a><p class="field-hint">A ZIP containing your library data and original documents.</p></div><div class="form-actions"><button class="button primary" type="submit">Save preferences</button></div><p class="version-note">Synopsis 0.1 · Made for curious minds.</p></form>`);
+function aiSettingsValues(data){
+  return {enabled:data.get('aiEnabled')==='on',endpoint:data.get('aiEndpoint')||'',model:data.get('aiModel')||'',apiKey:data.get('aiApiKey')||'',clearApiKey:data.get('aiClearKey')==='on'};
+}
+function aiSettingsFields(ai={}){
+  return `<div class="settings-section"><div class="settings-heading">${icon('spark')}AI model</div>
+    <label class="toggle-row"><span><strong>Enable AI answers and summaries</strong><small>Use this model when you request AI synthesis or an AI summary draft.</small></span><input type="checkbox" name="aiEnabled" ${ai.enabled?'checked':''}></label>
+    <label class="form-field">AI provider API URL<input type="url" name="aiEndpoint" value="${escape(ai.endpoint||'')}" placeholder="https://your-provider.example/v1" maxlength="2000" autocomplete="off"></label>
+    <label class="form-field">AI model identifier<input type="text" name="aiModel" value="${escape(ai.model||'')}" placeholder="Exact model name from your provider" maxlength="200" autocomplete="off"></label>
+    <p class="field-hint">Use a provider or local server that supports Chat Completions with JSON responses. This model handles AI answers and summary drafts. OCR and semantic search continue to run locally.</p>
+    <label class="form-field">AI API key<input type="password" name="aiApiKey" placeholder="${ai.hasSavedApiKey?'Leave blank to keep your saved key':'Optional for local servers'}" maxlength="8192" autocomplete="new-password"></label>
+    <p class="field-hint">${ai.keySource==='saved'?'A key is saved for this provider.':ai.keySource==='environment'?'Using the server environment API key. A key entered here takes priority.':'No API key configured.'} Keys entered here are stored in the local library database and excluded from exported backups. Changing the provider URL clears its saved key unless you enter a new one.</p>
+    ${ai.hasSavedApiKey?'<label class="ai-clear-key"><input type="checkbox" name="aiClearKey"> Remove saved API key (a server environment key may still apply)</label>':''}
+    <div class="field-buttons"><button type="button" class="button secondary small" data-action="test-ai-model">Test model</button><span class="field-hint">Sends a short test message, without document content.</span></div>
+    <p id="ai-test-result" class="field-hint" role="status"></p>
+  </div>`;
+}
+function chatToolSettingsFields(settings){
+  const ai=settings.imageAI||{}, web=settings.webSearch||{};
+  return `<div class="settings-section chat-tool-settings"><div class="settings-heading">${icon('spark')}Chat images &amp; web search</div>
+    <p class="field-hint">Chat answers and architecture diagrams use the model configured in AI model. Configure these optional tools to generate images and search the web.</p>
+    <label class="toggle-row"><span><strong>Enable image generation</strong><small>Use an image-capable model with the Images API.</small></span><input type="checkbox" name="imageEnabled" ${ai.enabled?'checked':''}></label>
+    <label class="form-field">Image provider API URL<input type="url" name="imageEndpoint" value="${escape(ai.endpoint||'')}" placeholder="https://your-provider.example/v1" maxlength="2000"></label>
+    <label class="form-field">Image model identifier<input name="imageModel" value="${escape(ai.model||'')}" placeholder="Exact image model name" maxlength="200"></label>
+    <label class="form-field">Image API key<input type="password" name="imageApiKey" maxlength="8192" autocomplete="new-password" placeholder="${ai.hasSavedApiKey?'Leave blank to keep saved key':'Optional when using the same provider as chat'}"></label>
+    <p class="field-hint">If the URLs match, an image request can use your chat provider key. Saved keys stay in the local database and are excluded from exported backups.</p>
+    ${ai.hasSavedApiKey?'<label class="ai-clear-key"><input type="checkbox" name="imageClearKey"> Remove saved image API key</label>':''}
+    <label class="ai-clear-key"><input type="checkbox" name="imageBase64" ${settings.imageBase64?'checked':''}> Request base64 response format (for providers that require it)</label>
+    <p class="field-hint">Models that return base64 images by default do not need this option. URL-only image responses are not supported.</p>
+    <label class="toggle-row"><span><strong>Enable Brave web search</strong><small>Search the web when selected in chat. Only your question is sent to Brave.</small></span><input type="checkbox" name="webEnabled" ${web.enabled?'checked':''}></label>
+    <label class="form-field">Brave Search API key<input type="password" name="webApiKey" maxlength="8192" autocomplete="new-password" placeholder="${web.hasSavedApiKey?'Leave blank to keep saved key':'Your Brave Search API key'}"></label>
+    ${web.hasSavedApiKey?'<label class="ai-clear-key"><input type="checkbox" name="webClearKey"> Remove saved web search API key</label>':''}
+  </div>`;
+}
+function chatToolSettingsValues(data){return {
+  imageAI:{enabled:data.get('imageEnabled')==='on',endpoint:data.get('imageEndpoint')||'',model:data.get('imageModel')||'',apiKey:data.get('imageApiKey')||'',clearApiKey:data.get('imageClearKey')==='on'},
+  imageBase64:data.get('imageBase64')==='on',
+  webSearch:{enabled:data.get('webEnabled')==='on',apiKey:data.get('webApiKey')||'',clearApiKey:data.get('webClearKey')==='on'}
+};}
+const settingsSections=[
+  ['ai','AI model','spark'],['chat','Chat tools','quote'],['intelligence','OCR & metadata','file'],
+  ['storage','Local storage','folder'],['cloud','Cloud storage','upload'],['backup','Backup','export']
+];
+function selectSettingsSection(key,focus=false){
+  if(!settingsSections.some(([id])=>id===key))key='ai';
+  document.querySelectorAll('[data-settings-tab]').forEach(button=>{
+    const active=button.dataset.settingsTab===key;
+    button.setAttribute('aria-selected',String(active));button.tabIndex=active?0:-1;
+    if(active&&focus)button.focus();
+  });
+  document.querySelectorAll('[data-settings-panel]').forEach(panel=>panel.hidden=panel.dataset.settingsPanel!==key);
+  const content=$('.settings-content');if(content)content.scrollTop=0;
+}
+function layoutSettings(section){
+  const form=$('#settings-form'), sections=[...form.children].filter(el=>el.matches('.settings-section'));
+  const actions=form.querySelector('.form-actions'), version=form.querySelector('.version-note');
+  form.className='settings-form';$('#modal').classList.add('settings-modal');
+  const layout=document.createElement('div');layout.className='settings-layout';
+  layout.innerHTML=`<nav class="settings-navigation" aria-label="Settings categories" role="tablist" aria-orientation="vertical">${settingsSections.map(([key,label,symbol])=>`<button type="button" role="tab" id="settings-tab-${key}" data-settings-tab="${key}" aria-controls="settings-panel-${key}">${icon(symbol)}<span>${label}</span></button>`).join('')}</nav><div class="settings-content"></div>`;
+  const content=layout.querySelector('.settings-content');
+  sections.forEach((section,index)=>{
+    const key=settingsSections[index][0],panel=document.createElement('section');
+    panel.id='settings-panel-'+key;panel.dataset.settingsPanel=key;panel.setAttribute('role','tabpanel');
+    panel.setAttribute('aria-labelledby','settings-tab-'+key);panel.tabIndex=0;panel.append(section);content.append(panel);
+  });
+  const footer=document.createElement('footer');footer.className='settings-footer';footer.append(version,actions);
+  form.replaceChildren(layout,footer);
+  layout.querySelector('.settings-navigation').addEventListener('click',event=>{
+    const button=event.target.closest('[data-settings-tab]');if(button)selectSettingsSection(button.dataset.settingsTab);
+  });
+  layout.querySelector('.settings-navigation').addEventListener('keydown',event=>{
+    const tabs=[...layout.querySelectorAll('[data-settings-tab]')],index=tabs.indexOf(event.target);
+    if(index<0||!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
+    event.preventDefault();
+    const next=event.key==='Home'?0:event.key==='End'?tabs.length-1:(index+(event.key==='ArrowDown'?1:-1)+tabs.length)%tabs.length;
+    selectSettingsSection(tabs[next].dataset.settingsTab,true);
+  });
+  // Reveal a hidden invalid field before the browser attempts to focus it.
+  form.addEventListener('invalid',event=>{
+    const panel=event.target.closest('[data-settings-panel]');if(panel)selectSettingsSection(panel.dataset.settingsPanel);
+  },true);
+  selectSettingsSection(section);
+}
+async function openSettings(section='ai'){
+  state.modal='settings';const [s,cloud]=await Promise.all([api('/settings'),api('/connectors')]);
+  modal('Settings','Configure your research workspace.',`<form id="settings-form" class="modal-body">${aiSettingsFields(s.ai)}${chatToolSettingsFields(s)}<div class="settings-section"><div class="settings-heading">${icon('spark')}Document intelligence</div><label class="toggle-row"><span><strong>Automatic DOI metadata lookup</strong><small>Send detected DOIs to Crossref to retrieve reference details. Crossref receives the DOI only.</small></span><input type="checkbox" name="metadataLookup" ${s.metadataLookup?'checked':''}></label><label class="form-field">OCR language<select name="ocrLanguage" ${!s.languages.length?'disabled':''}>${s.languages.filter(l=>l!=='osd').map(l=>`<option value="${escape(l)}" ${s.ocrLanguage===l?'selected':''}>${l==='eng'?'English':escape(l)}</option>`).join('')}</select></label><p class="field-hint">${s.ocrAvailable?'Tesseract is installed and ready. Additional OCR languages can be installed on your computer.':'Tesseract was not found. Install it to recognize text in scanned PDFs and images.'}</p></div><div class="settings-section"><div class="settings-heading">${icon('folder')}Document storage</div><label class="form-field" for="upload-directory">Upload folder<input id="upload-directory" name="uploadDirectory" type="text" value="${escape(s.uploadDirectory)}" placeholder="${escape(s.defaultUploadDirectory)}" aria-describedby="upload-directory-hint" autocomplete="off" spellcheck="false"></label><p class="field-hint" id="upload-directory-hint">Enter a folder path on the computer running Synopsis, such as ~/Documents/Synopsis, or browse for one. Missing folders are created when you save. New uploads and watched-folder imports use this location; existing documents stay in their current folders.</p><div class="field-buttons"><button class="text-button" type="button" data-action="browse-upload-folder">${icon('folder')}Browse…</button><button class="text-button" type="button" data-action="default-upload-folder" data-default-folder="${escape(s.defaultUploadDirectory)}">Use default folder</button></div></div>${connectorFields(cloud,escape,safeUrl)}<div class="settings-section"><div class="settings-heading">${icon('folder')}Library backup</div><p class="muted">References, notes, and local document copies stay on this computer. Connected drives store copies of originals; library metadata and shared libraries are not synchronized.</p><a class="button secondary" href="/api/backup">${icon('export')}Download library backup</a><p class="field-hint">A ZIP containing your library data and original documents.</p></div><div class="form-actions"><button class="button primary" type="submit">Save preferences</button></div><p class="version-note">Synopsis 0.1 · Made for curious minds.</p></form>`);
+  layoutSettings(section);
 }
 function openReader(tab='original'){
   state.readerTab=tab;state.modal='reader';const i=state.detail;
@@ -246,7 +330,46 @@ function openHighlight(text=''){
   state.modal='highlight';modal('Keep the important part.','Highlights stay connected to their source.',`<form id="highlight-form" class="modal-body"><label class="form-field">Passage<textarea name="text" rows="7" required maxlength="10000">${escape(text)}</textarea></label><label class="form-field">Page<input type="number" name="page" value="1" min="1" max="${Math.max(1,state.detail.pageCount)}" required></label><div class="form-actions"><button class="button primary" type="submit">Save highlight</button></div></form>`);
 }
 async function patch(id,fields){await api('/items/'+id,{method:'PATCH',body:fields});await refresh({detail:id===state.selected});}
+let deletingReferences=false;
+function openPermanentDelete(items){
+  if(deletingReferences)return;
+  const candidates=items.filter(item=>item?.trashed);
+  if(!candidates.length){toast('Select references in Trash first.',true);return;}
+  state.deleteCandidates=candidates.map(({id,title})=>({id,title}));
+  state.modal='confirm-delete';
+  modal(`Permanently delete ${candidates.length===1?'this reference':candidates.length+' references'}?`,
+    'This removes the selected references, their notes, highlights, and local document files. This cannot be undone. Any cloud copies remain in Google Drive or OneDrive.',
+    `<div class="modal-body"><ul class="delete-reference-list">${candidates.map(item=>`<li>${escape(item.title)}</li>`).join('')}</ul><div class="form-actions"><button class="button secondary" data-action="close-modal">Keep in trash</button><button class="button danger-button" data-action="confirm-delete">Delete permanently</button></div></div>`);
+  $('#modal [data-action="close-modal"].secondary').focus();
+}
+async function permanentlyDeleteReferences(){
+  if(deletingReferences||state.modal!=='confirm-delete')return;
+  deletingReferences=true;
+  const button=$('[data-action="confirm-delete"]');button.disabled=true;button.textContent='Deleting…';
+  const removed=new Set(), failures=[];
+  try{
+    for(const item of state.deleteCandidates){
+      try{await api('/items/'+item.id,{method:'DELETE'});removed.add(item.id);}
+      catch(error){failures.push({...item,message:error.message});}
+    }
+    for(const id of removed)state.checked.delete(id);
+    if(removed.has(state.selected)){state.selected=null;state.detail=null;detailSerial++;}
+    closeModal();await refresh({detail:!!state.selected});
+    if(failures.length){
+      state.modal='delete-result';
+      modal('Some references could not be deleted',`${removed.size} permanently deleted; ${failures.length} could not be deleted.`,
+        `<div class="modal-body"><ul class="delete-reference-list">${failures.map(item=>`<li><strong>${escape(item.title)}</strong><p>${escape(item.message)}</p></li>`).join('')}</ul><div class="form-actions"><button class="button secondary" data-action="close-modal">Done</button></div></div>`);
+    }else{toast(`${removed.size} reference${removed.size===1?'':'s'} permanently deleted`);}
+  }finally{deletingReferences=false;button.disabled=false;}
+}
 const actions={
+  'test-ai-model':async()=>{
+    const button=$('[data-action="test-ai-model"]'), output=$('#ai-test-result');
+    button.disabled=true;output.textContent='Testing model…';
+    try{const result=await api('/settings/test-ai',{method:'POST',body:{ai:aiSettingsValues(new FormData($('#settings-form')))}});output.textContent=result.model+': '+result.message;}
+    catch(error){output.textContent=error.message;}
+    finally{button.disabled=false;}
+  },
   'default-upload-folder':()=>{$('#upload-directory').value=$('[data-default-folder]').dataset.defaultFolder;},
   'browse-upload-folder':async()=>{const button=$('[data-action="browse-upload-folder"]');button.disabled=true;try{const result=await api('/settings/browse-folder',{method:'POST'});if(result.path)$('#upload-directory').value=result.path;}finally{button.disabled=false;}},
   upload:()=>openUpload(), 'choose-files':()=>$('#file-input').click(), 'choose-import':()=>$('#import-input').click(),
@@ -267,8 +390,9 @@ const actions={
   trash:async()=>{const trashed=!state.detail.trashed;await patch(state.selected,{trashed});toast(trashed?'Moved to trash':'Restored to library');},
   'read-selected':async()=>{for(const id of state.checked)await api('/items/'+id,{method:'PATCH',body:{read:true}});await refresh({detail:true});toast('References marked as read');},
   'trash-selected':async()=>{for(const id of state.checked)await api('/items/'+id,{method:'PATCH',body:{trashed:state.scope!=='trash'}});state.checked.clear();await refresh({detail:true});toast('Library updated');},
-  delete:()=>{state.modal='confirm';modal('Delete this reference?','This permanently removes the reference, its notes, and its original document.',`<div class="modal-body"><p>${escape(state.detail.title)}</p><div class="form-actions"><button class="button secondary" data-action="close-modal">Keep in trash</button><button class="button danger-button" data-action="confirm-delete">Permanently delete</button></div></div>`);},
-  'confirm-delete':async()=>{await api('/items/'+state.selected,{method:'DELETE'});closeModal();actions['close-detail']();await refresh();toast('Reference deleted');},
+  delete:()=>openPermanentDelete([state.detail]),
+  'delete-selected':()=>openPermanentDelete(state.items.filter(item=>state.checked.has(item.id))),
+  'confirm-delete':permanentlyDeleteReferences,
   'delete-collection':async()=>{await api('/collections/'+state.scope.slice(11),{method:'DELETE'});state.scope='all';closeModal();await refresh({detail:true});toast('Collection removed; references kept');},
   reader:()=>openReader(),highlight:()=>openHighlight(),
   'highlight-selection':()=>{const selection=window.getSelection();const text=state.readerTab==='text'&&$('#extracted-text')?.contains(selection.anchorNode)?selection.toString():'';openHighlight(text);},
@@ -315,7 +439,7 @@ document.addEventListener('submit',async event=>{
       for(const id of state.organizeIds){const current=state.items.find(i=>i.id===id);const bulk=state.organizeBulk;await api('/items/'+id,{method:'PATCH',body:{tags:bulk?[...new Set([...current.tags,...tags])]:tags,collections:bulk?[...new Set([...current.collections,...collections])]:collections}});}
       closeModal();await refresh({detail:true});toast('Organization saved');
     }else if(form.id==='settings-form'){
-      const body={metadataLookup:data.get('metadataLookup')==='on',uploadDirectory:data.get('uploadDirectory')};if(data.has('ocrLanguage'))body.ocrLanguage=data.get('ocrLanguage');await api('/settings',{method:'PATCH',body});closeModal();toast('Preferences saved');
+      const body={metadataLookup:data.get('metadataLookup')==='on',uploadDirectory:data.get('uploadDirectory'),ai:aiSettingsValues(data),...chatToolSettingsValues(data)};if(data.has('ocrLanguage'))body.ocrLanguage=data.get('ocrLanguage');await api('/settings',{method:'PATCH',body});$('#settings-form').querySelectorAll('input[type=password]').forEach(input=>input.value='');closeModal();toast('Preferences saved');
     }else if(form.id==='highlight-form'){
       await api('/items/'+state.selected+'/annotations',{method:'POST',body:{text:data.get('text'),page:Number(data.get('page'))}});closeModal();state.tab='highlights';await refresh({detail:true});toast('Highlight saved');
     }
@@ -378,4 +502,6 @@ for(const [id,name] of Object.entries({'settings-icon':'settings','breadcrumb-ic
 refresh().catch(e=>{toast(e.message,true);$('#item-list').innerHTML='<div class="empty-state"><h2>We couldn’t load your library.</h2><p>Make sure the Flask server is running, then refresh this page.</p></div>';});
 
 // Small, explicit interface for the research workspace module.
-export {state, api, icon, escape, toast, refresh, loadDetail, safeUrl};
+export {state, api, icon, escape, toast, refresh, loadDetail, safeUrl, openSettings};
+
+installCloudUI({api,escape,safeUrl,toast,refresh,state,openSettings});

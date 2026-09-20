@@ -2,11 +2,9 @@
 import csv
 import io
 import json
-import os
 import re
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
 from uuid import uuid4
 
 from flask import Blueprint, request, jsonify, send_file
@@ -17,6 +15,7 @@ from .intelligence import Intelligence, passages_for, validate_source, SECTION_T
 from .workflows import selected, active_item, text_field, record_decision, review_report, document_diff, local_graph
 from .services import publication_status, openalex_work, apply_rules, WatchService
 from .storage import now, summary
+from .ai import ai_changes, public_ai
 
 
 def csv_response(rows, filename):
@@ -61,7 +60,7 @@ def register_research(app,store,processor):
         return jsonify(notebooks=store.entities('notebooks'),matrices=store.entities('matrices'),
                        reviews=[review_report(r) for r in store.entities('reviews')],versions=store.entities('versions'),
                        rules=store.entities('rules'),watchers=store.entities('watchers'),statuses=store.entities('status'),
-                       ai={**store.setting('ai',{'enabled':False,'endpoint':'','model':''}),'hasApiKey':bool(os.environ.get('SYNOPSIS_AI_API_KEY'))},
+                       ai=public_ai(store),
                        automaticStatusChecks=store.setting('automaticStatusChecks',False))
 
     @bp.post('/search')
@@ -114,23 +113,14 @@ def register_research(app,store,processor):
     @bp.patch('/settings')
     def configure():
         data=payload()
-        if 'ai' in data:
-            ai=data['ai']
-            if not isinstance(ai,dict) or not isinstance(ai.get('enabled'),bool):
-                raise ValueError('Choose whether AI is enabled.')
-            endpoint=text_field(ai.get('endpoint',''),'API base URL',2000,required=ai['enabled']).rstrip('/')
-            model=text_field(ai.get('model',''),'Model',200,required=ai['enabled'])
-            if endpoint:
-                url=urlsplit(endpoint)
-                if not url.hostname or url.username or url.password or url.query or url.fragment or url.scheme not in ('http','https'):
-                    raise ValueError('Use an API base URL without credentials, query parameters, or fragments.')
-                if url.scheme=='http' and url.hostname not in ('localhost','127.0.0.1','::1'):
-                    raise ValueError('External APIs require HTTPS.')
-            store.set_setting('ai',{'enabled':ai['enabled'],'endpoint':endpoint,'model':model})
+        changes=ai_changes(store,data['ai']) if 'ai' in data else {}
         if 'automaticStatusChecks' in data:
             if not isinstance(data['automaticStatusChecks'],bool):
                 raise ValueError('Automatic checks must be true or false.')
-            store.set_setting('automaticStatusChecks',data['automaticStatusChecks'])
+            changes['automaticStatusChecks']=data['automaticStatusChecks']
+        with store.connect() as db:
+            for key,value in changes.items():
+                db.execute('INSERT OR REPLACE INTO settings VALUES (?, ?)',(key,json.dumps(value)))
         return jsonify(ok=True)
 
     @bp.post('/notebooks')

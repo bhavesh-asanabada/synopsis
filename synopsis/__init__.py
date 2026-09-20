@@ -21,6 +21,8 @@ from werkzeug.utils import secure_filename
 
 from ._paths import PACKAGE_DIR, default_data_dir
 from .storage import Store, summary
+from .ai import ai_changes, public_ai, test_model
+from .chat_tools import chat_settings_changes, public_chat_settings
 from .processing import Processor, ALLOWED
 from .metadata import lookup_doi
 from .citations import bibliography, export_references, import_references, STYLES
@@ -106,14 +108,21 @@ def create_app(config=None):
         app.config.update(config)
     store = Store(app.config['DATA_DIR'])
     processor = Processor(store)
+    from .cloud import register_cloud
+    cloud = register_cloud(app, store)
+    processor.cloud = cloud
     app.extensions['store'] = store
     app.extensions['processor'] = processor
     from .research import register_research
     register_research(app, store, processor)
+    from .chat import register_chat
+    register_chat(app, store)
 
     def queue(item_id):
         if app.config['PROCESS_JOBS']:
             processor.submit(item_id)
+        else:
+            cloud.enqueue(item_id)
 
     def get_item(item_id):
         item = store.get(item_id)
@@ -198,6 +207,7 @@ def create_app(config=None):
         return jsonify(summary(store.update(item_id, changes)))
 
     @app.delete('/api/items/<item_id>')
+    @cloud.synchronized
     def delete_item(item_id):
         item = get_item(item_id)
         if not item['trashed']:
@@ -206,7 +216,7 @@ def create_app(config=None):
             raise ValueError('Wait for document processing to finish before deleting it.')
         if any(item_id in i.get('attachments',[]) for i in store.items() if i['id'] != item_id):
             raise ValueError('This document is attached to another reference. Keep it to preserve its source links.')
-        for kind in ('notebooks','matrices','reviews','versions'):
+        for kind in ('notebooks','matrices','reviews','versions','chats'):
             if any(item_id in json.dumps(entity) for entity in store.entities(kind)):
                 raise ValueError('Research records cite this document. Remove those records before permanently deleting the source.')
         if item['filePath']:
@@ -251,7 +261,7 @@ def create_app(config=None):
                                      collections=[collection] if collection else [], status='queued',
                                      reviewed=False, source='document', progress='Waiting to process…'))
             queue(item['id'])
-            results.append(summary(item))
+            results.append(summary(store.get(item['id'])))
         return jsonify(items=results), 202
 
     @app.post('/api/items/<item_id>/retry')
@@ -397,12 +407,15 @@ def create_app(config=None):
             languages = []
         return jsonify(metadataLookup=store.setting('metadataLookup', True), ocrLanguage=store.setting('ocrLanguage', 'eng'),
                        languages=languages, ocrAvailable=bool(shutil.which('tesseract')), styles=STYLES,
-                       uploadDirectory=str(store.uploads), defaultUploadDirectory=str(store.default_uploads))
+                       uploadDirectory=str(store.uploads), defaultUploadDirectory=str(store.default_uploads), ai=public_ai(store), **public_chat_settings(store))
 
     @app.patch('/api/settings')
     def update_settings():
         payload = request.get_json()
         changes = {}
+        changes.update(chat_settings_changes(store, payload))
+        if 'ai' in payload:
+            changes.update(ai_changes(store, payload['ai']))
         if 'metadataLookup' in payload:
             if not isinstance(payload['metadataLookup'], bool):
                 raise ValueError('Metadata lookup must be true or false.')
@@ -430,6 +443,10 @@ def create_app(config=None):
             raise ValueError('The folder picker timed out. Please try again.')
         return jsonify(path=path)
 
+    @app.post('/api/settings/test-ai')
+    def test_ai():
+        return jsonify(test_model(store, request.get_json().get('ai')))
+
     @app.get('/api/backup')
     def backup():
         buffer = io.BytesIO()
@@ -441,6 +458,8 @@ def create_app(config=None):
             archive.writestr('library.json', json.dumps(dict(version=2, items=portable_items, collections=store.collections(), entities=entities,
                               settings={'metadataLookup': store.setting('metadataLookup', True),
                                         'ocrLanguage': store.setting('ocrLanguage', 'eng'), 'ai':store.setting('ai',{}),
+                                        'imageAI':store.setting('imageAI',{}),'imageBase64':store.setting('imageBase64',False),
+                                        'webSearch':store.setting('webSearch',{}),
                                         'automaticStatusChecks':store.setting('automaticStatusChecks',False)}), indent=2))
             for item in items:
                 if item.get('filePath'):

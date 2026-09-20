@@ -44,6 +44,10 @@ Coverage is code-execution coverage, not OCR quality, factual correctness, or sc
 | Automation | Stable watched files copied, never moved; duplicate scans are idempotent; forbidden storage-folder watch; post-OCR tag/collection rules |
 | Recovery | Original and version-2 ZIP restore; notes, attachments, research evidence, and preferences retained; existing directories never overwritten; AI and watchers paused on restore |
 | Browser journeys | Main library workflow; search → evidence → comparison → versions → graph → review → automation → preferences; PDF capture/export; persistence and mobile layout; no browser JavaScript errors |
+| Chat API and tools | Selected-file scope and follow-ups; idempotent retries; concurrent send/delete protection; source validation; atomic failure; web excerpts; image response validation; passive SVG diagrams; downloads; backup recovery and secret exclusion; source deletion protection |
+| Chat browser journeys | Floating/full workspace, persistent history, file selection and uploads, web citations, image/diagram downloads, diagram zoom, mobile scrolling, model settings, and error recovery |
+| Cloud storage | Google Drive and OneDrive OAuth state/browser binding, replay/expiry/denial handling, token refresh and rotation, uploads, checksum/size validation, lost-response retries without duplicate copies, restart recovery, watched-file intake, independent OCR, disconnect/account changes, deletion/transfer locking, secret-free backup and paused restore |
+| Cloud browser journey | Simulated provider sign-in redirect, destination selection, upload failure/retry, saved-copy link, reload persistence, mobile settings and disconnect |
 
 ## Evidence and remaining verification limits
 
@@ -53,7 +57,15 @@ A real local semantic model is exercised, but the test corpus is small; no bench
 
 Decision identities in a systematic review are user-selected local labels. Authentication, independent reviewer accounts, distributed worker recovery, and cloud synchronization are outside this release's tested scope.
 
-## Latest verification run
+## Cloud connector verification run
+
+The current implementation passed **107 tests** across the existing suites and 12 connector tests, including a browser journey. Provider consent, token exchange, and cloud HTTP requests use controlled fixtures; no real Google or Microsoft account was connected. Screenshot: `artifacts/cloud-connectors.png`. OAuth app registration, account consent, quota, and tenant policy require a real-account check. Coverage was not remeasured.
+
+## Earlier chat verification run
+
+The current implementation passed **95 tests**: 80 existing application/research tests and 15 chat tests, including three chat browser journeys. Chat provider calls use controlled fixtures; these tests do not make credentialed external model, image, or search requests. Screenshots include `artifacts/chat-floating.png`, `artifacts/chat-architecture.png`, and `artifacts/chat-mobile.png`. Coverage was not remeasured for this change.
+
+## Earlier coverage baseline
 
 Verified on this workspace with Python 3.14.5, Chromium, and installed Tesseract:
 

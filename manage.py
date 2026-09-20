@@ -28,6 +28,8 @@ def restore_backup(backup, destination):
             for item in payload['items']:
                 # Restored documents always belong to the new library's uploads folder.
                 item.pop('uploadDirectory', None)
+                if item.get('cloudStorage', {}).get('status') in ('queued', 'uploading', 'error'):
+                    item['cloudStorage'].update(status='paused', error='Restored backup. Connect a cloud account and use Save to cloud to resume.')
                 filename = item.get('filePath', '')
                 if filename:
                     if Path(filename).name != filename or '\\' in filename or filename in ('.', '..'):
@@ -45,6 +47,10 @@ def restore_backup(backup, destination):
                 store.put_entity(entity['kind'],fields)
             if 'ai' in payload.get('settings',{}):
                 store.set_setting('ai',{**payload['settings']['ai'],'enabled':False})
+            for key in ('imageAI','webSearch'):
+                if key in payload.get('settings',{}):
+                    store.set_setting(key,{**payload['settings'][key],'enabled':False})
+            store.set_setting('imageBase64',payload.get('settings',{}).get('imageBase64',False))
         staging.rename(destination)
         return len(payload['items'])
     finally:

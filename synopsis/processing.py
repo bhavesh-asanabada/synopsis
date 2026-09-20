@@ -25,8 +25,11 @@ class Processor:
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='synopsis-ocr')
         self.pending = set()
         self.lock = Lock()
+        self.cloud = None
 
     def submit(self, item_id):
+        if self.cloud:
+            self.cloud.enqueue(item_id)
         with self.lock:
             if item_id in self.pending:
                 return
